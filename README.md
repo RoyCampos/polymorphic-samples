@@ -417,22 +417,36 @@ win/
 
 ### 3. Pipeline completo (Validar → Extraer → Ejecutar)
 
-```powershell
-.\Invoke-SampleValidation.ps1 -Mode Full -ExtractPath "C:\Lab\Samples"
-```
+El script soporta **4 escenarios de ejecución** combinando método de ejecución y estado de Defender:
 
-- Solicita confirmación explícita (`CONFIRM`) antes de ejecutar
-- Delay de 15 segundos entre muestras para observación de telemetría EDR/XDR
-- Registra toda la actividad con timestamps en archivo de log
+| Escenario | Comando | Qué prueba |
+|-----------|---------|------------|
+| **Defender ON + Disco** | `.\Invoke-SampleValidation.ps1 -Mode Full -ExecMethod Disk` | Detección estática + behavioral de Defender Y XDR simultáneamente |
+| **Defender ON + Memoria** | `.\Invoke-SampleValidation.ps1 -Mode Full -ExecMethod InMemory` | Capacidad de Defender y XDR para detectar amenazas fileless en memoria |
+| **Defender OFF + Disco** | `.\Invoke-SampleValidation.ps1 -Mode Full -PrepareEnv -ExecMethod Disk` | Solo el XDR detecta — prueba ejecución desde filesystem sin interferencia de Defender |
+| **Defender OFF + Memoria** | `.\Invoke-SampleValidation.ps1 -Mode Full -PrepareEnv -ExecMethod InMemory` | Solo el XDR detecta — prueba detección fileless pura (carga reflectiva en memoria) |
+
+> **`-PrepareEnv` es completamente opcional.** Sin este flag, Windows Defender permanece activo e intacto. Úsalo solo cuando quieras aislar la detección exclusivamente al XDR bajo prueba.
+
+#### Métodos de ejecución
+
+- **`Disk`** (default): Ejecuta el sample desde el filesystem. El binario se escribe a disco y se lanza como proceso. Prueba detección estática (firmas, heurística) + behavioral (monitoreo de comportamiento en runtime).
+
+- **`InMemory`**: Carga el sample directamente en memoria sin escritura a disco. Para assemblies .NET usa `Reflection.Assembly.Load()`, para PEs nativos usa `VirtualAlloc` + `CreateThread` via P/Invoke. Prueba la capacidad del EDR/XDR de detectar amenazas **fileless** — inyección en memoria, ejecución reflectiva, y técnicas LOTL (Living Off The Land).
 
 ### Parámetros del Script
 
 | Parámetro | Default | Descripción |
 |-----------|---------|-------------|
 | `-Mode` | `Validate` | `Validate` / `Extract` / `Execute` / `Full` |
+| `-ExecMethod` | `Disk` | `Disk` (filesystem) / `InMemory` (reflective, fileless) |
+| `-PrepareEnv` | Off | **Opcional.** Desactiva Defender real-time, behavior monitoring, IOAV y cloud protection. Agrega exclusiones de path y extensión. Requiere ejecutar como Administrador |
+| `-DelaySeconds` | `15` | Segundos de espera entre ejecución de muestras para observación de telemetría |
 | `-SamplesPath` | Directorio del script | Ruta a los directorios de muestras |
 | `-ExtractPath` | `%TEMP%\PolyTestSamples` | Destino para binarios extraídos |
 | `-LogPath` | Auto-generado | Ruta custom para el archivo de log |
+
+> **Nota:** Si usas `-PrepareEnv`, al finalizar el script te preguntará si deseas restaurar Defender a su estado original. Si prefieres no restaurar, simplemente revierte el snapshot de la VM.
 
 ---
 
