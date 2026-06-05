@@ -58,7 +58,11 @@ param(
 
     # Seconds to wait between sample executions for EDR telemetry observation
     [Parameter()]
-    [int]$DelaySeconds = 15
+    [int]$DelaySeconds = 15,
+
+    # Target a specific family (supports wildcards, e.g. "Win32.Emotet" or "*Turla*")
+    [Parameter()]
+    [string]$Family = ""
 )
 
 # === CONFIGURATION ============================================================
@@ -95,6 +99,7 @@ function Write-Banner {
   Mode        : $Mode
   Exec Method : $ExecMethod
   PrepareEnv  : $PrepareEnv
+  Family      : $(if ($Family) { $Family } else { 'ALL' })
   Samples     : $SamplesPath
   Extract To  : $ExtractPath
   Delay       : ${DelaySeconds}s between samples
@@ -711,6 +716,19 @@ if ($PrepareEnv) {
 # Discover sample families (all subdirectories except hidden/system)
 $families = Get-ChildItem -Path $SamplesPath -Directory | Where-Object {
     $_.Name -notlike ".*" -and $_.Name -ne "__MACOSX"
+}
+
+# Filter by family if specified
+if ($Family) {
+    $families = $families | Where-Object { $_.Name -like $Family }
+    if ($families.Count -eq 0) {
+        Write-Log "No family matching '$Family' found in $SamplesPath" "FAIL"
+        Write-Log "Available families:" "INFO"
+        Get-ChildItem -Path $SamplesPath -Directory | Where-Object {
+            $_.Name -notlike ".*" -and $_.Name -ne "__MACOSX"
+        } | ForEach-Object { Write-Log "  - $($_.Name)" "INFO" }
+        exit 1
+    }
 }
 
 if ($families.Count -eq 0) {
