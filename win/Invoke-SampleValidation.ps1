@@ -61,13 +61,13 @@ param(
     [int]$DelaySeconds = 15
 )
 
-# ─── CONFIGURATION ───────────────────────────────────────────────────────────
+# === CONFIGURATION ============================================================
 $script:PassedCount = 0
 $script:FailedCount = 0
 $script:SkippedCount = 0
 $script:ExtractedSamples = @()
 
-# ─── LOGGING ─────────────────────────────────────────────────────────────────
+# === LOGGING ==================================================================
 function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
@@ -86,11 +86,11 @@ function Write-Log {
 function Write-Banner {
     $banner = @"
 
-  ╔══════════════════════════════════════════════════════════════╗
-  ║     POLYMORPHIC SAMPLE INTEGRITY VALIDATION FRAMEWORK       ║
-  ║                 Authorized Testing Only                      ║
-  ║                                                by 0xp3rc    ║
-  ╚══════════════════════════════════════════════════════════════╝
+  +==============================================================+
+  |     POLYMORPHIC SAMPLE INTEGRITY VALIDATION FRAMEWORK        |
+  |                 Authorized Testing Only                       |
+  |                                                by 0xp3rc     |
+  +==============================================================+
 
   Mode        : $Mode
   Exec Method : $ExecMethod
@@ -105,7 +105,7 @@ function Write-Banner {
     Write-Host $banner -ForegroundColor DarkCyan
 }
 
-# ─── ENVIRONMENT PREPARATION ────────────────────────────────────────────────
+# === ENVIRONMENT PREPARATION ==================================================
 function Set-LabEnvironment {
     <#
     .SYNOPSIS
@@ -122,7 +122,7 @@ function Set-LabEnvironment {
         return $false
     }
 
-    Write-Host "`n  ─── ENVIRONMENT PREPARATION ─────────────────────────────" -ForegroundColor Yellow
+    Write-Host "`n  --- ENVIRONMENT PREPARATION ---------------------------------" -ForegroundColor Yellow
 
     # 1. Disable Defender Real-Time Protection
     try {
@@ -199,7 +199,7 @@ function Restore-LabEnvironment {
     .SYNOPSIS
         Restores Windows Defender to its default state after testing.
     #>
-    Write-Host "`n  ─── RESTORING ENVIRONMENT ────────────────────────────────" -ForegroundColor Yellow
+    Write-Host "`n  --- RESTORING ENVIRONMENT ------------------------------------" -ForegroundColor Yellow
 
     try {
         Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue
@@ -224,13 +224,13 @@ function Restore-LabEnvironment {
     }
 }
 
-# ─── HASH VALIDATION ────────────────────────────────────────────────────────
+# === HASH VALIDATION ==========================================================
 function Test-SampleIntegrity {
     param([string]$FamilyPath)
 
     $familyName = Split-Path $FamilyPath -Leaf
-    Write-Host "`n  ─── $familyName " -NoNewline
-    Write-Host ("─" * (50 - $familyName.Length)) -ForegroundColor DarkGray
+    Write-Host "`n  --- $familyName " -NoNewline
+    Write-Host ("-" * (50 - $familyName.Length)) -ForegroundColor DarkGray
 
     $zipFile = Get-ChildItem -Path $FamilyPath -Filter "*.zip" | Select-Object -First 1
     if (-not $zipFile) {
@@ -258,14 +258,14 @@ function Test-SampleIntegrity {
 
     $allPassed = $true
 
-    # ── SHA256 Validation ──
+    # -- SHA256 Validation --
     $sha256File = Get-ChildItem -Path $FamilyPath -Filter "*.sha256" | Select-Object -First 1
     if ($sha256File) {
         $expectedLine = (Get-Content $sha256File.FullName -Raw).Trim()
 
         # Detect if it's actually a SHA1 (40 hex chars) stored in .sha256 file
-        if ($expectedLine -match "^([a-f0-9]{40})\s") {
-            Write-Log "SHA256 file contains SHA1 hash (40 chars) — validating as SHA1" "WARN"
+        if ($expectedLine -match '^([a-f0-9]{40})\s') {
+            Write-Log "SHA256 file contains SHA1 hash (40 chars) -- validating as SHA1" "WARN"
             $expectedHash = $Matches[1]
             $computedHash = (Get-FileHash -Path $zipFile.FullName -Algorithm SHA1).Hash.ToLower()
             $result.SHA1 = $computedHash
@@ -276,7 +276,7 @@ function Test-SampleIntegrity {
                 $allPassed = $false
             }
         }
-        elseif ($expectedLine -match "^([a-f0-9]{64})\s") {
+        elseif ($expectedLine -match '^([a-f0-9]{64})\s') {
             $expectedHash = $Matches[1]
             $computedHash = (Get-FileHash -Path $zipFile.FullName -Algorithm SHA256).Hash.ToLower()
             $result.SHA256 = $computedHash
@@ -292,14 +292,14 @@ function Test-SampleIntegrity {
         }
     }
 
-    # ── SHA1/SHASUM Validation (.shasum and .sha files) ──
+    # -- SHA1/SHASUM Validation (.shasum and .sha files) --
     $shasumFile = Get-ChildItem -Path $FamilyPath -Filter "*.shasum" | Select-Object -First 1
     if (-not $shasumFile) {
         $shasumFile = Get-ChildItem -Path $FamilyPath -Filter "*.sha" | Select-Object -First 1
     }
     if ($shasumFile) {
         $expectedLine = (Get-Content $shasumFile.FullName -Raw).Trim()
-        if ($expectedLine -match "^([a-f0-9]{40})\s") {
+        if ($expectedLine -match '^([a-f0-9]{40})\s') {
             $expectedHash = $Matches[1]
             $computedHash = (Get-FileHash -Path $zipFile.FullName -Algorithm SHA1).Hash.ToLower()
             $result.SHA1 = $computedHash
@@ -312,18 +312,18 @@ function Test-SampleIntegrity {
         }
     }
 
-    # ── MD5 Validation ──
+    # -- MD5 Validation --
     $md5File = Get-ChildItem -Path $FamilyPath -Filter "*.md5" | Select-Object -First 1
     if ($md5File) {
         $expectedLine = (Get-Content $md5File.FullName -Raw).Trim()
         $expectedHash = ""
 
         # Format: "hash  filename"
-        if ($expectedLine -match "^([a-f0-9]{32})\s") {
+        if ($expectedLine -match '^([a-f0-9]{32})\s') {
             $expectedHash = $Matches[1]
         }
         # Format: "MD5 (filename) = hash"
-        elseif ($expectedLine -match "=\s*([a-f0-9]{32})") {
+        elseif ($expectedLine -match '=\s*([a-f0-9]{32})') {
             $expectedHash = $Matches[1]
         }
 
@@ -356,12 +356,12 @@ function Test-SampleIntegrity {
     return $result
 }
 
-# ─── EXTRACTION ──────────────────────────────────────────────────────────────
+# === EXTRACTION ===============================================================
 function Expand-Sample {
     param([PSCustomObject]$SampleInfo)
 
     if (-not $SampleInfo -or $SampleInfo.Integrity -eq "FAILED") {
-        Write-Log "Skipping extraction for $($SampleInfo.Family) — integrity check failed" "WARN"
+        Write-Log "Skipping extraction for $($SampleInfo.Family) -- integrity check failed" "WARN"
         return
     }
 
@@ -374,20 +374,20 @@ function Expand-Sample {
 
     try {
         # Use 7-Zip if available (handles password-protected ZIPs better)
-        $7z = Get-Command "7z" -ErrorAction SilentlyContinue
-        if (-not $7z) {
-            $7z = Get-Command "C:\Program Files\7-Zip\7z.exe" -ErrorAction SilentlyContinue
+        $sevenZip = Get-Command "7z" -ErrorAction SilentlyContinue
+        if (-not $sevenZip) {
+            $sevenZip = Get-Command "C:\Program Files\7-Zip\7z.exe" -ErrorAction SilentlyContinue
         }
 
-        if ($7z) {
+        if ($sevenZip) {
             $password = $SampleInfo.Password
-            $args7z = @("x", "-y", "-o$destDir", "-p$password", $SampleInfo.ZipFile)
-            & $7z.Source @args7z 2>&1 | Out-Null
+            $szArgs = @("x", "-y", "-o$destDir", "-p$password", $SampleInfo.ZipFile)
+            & $sevenZip.Source @szArgs 2>&1 | Out-Null
             Write-Log "Extracted via 7-Zip" "OK"
         }
         else {
             # Fallback: PowerShell Expand-Archive (no password support)
-            Write-Log "7-Zip not found — attempting PowerShell extraction (may fail with password-protected ZIPs)" "WARN"
+            Write-Log "7-Zip not found -- attempting PowerShell extraction (may fail with password-protected ZIPs)" "WARN"
             Expand-Archive -Path $SampleInfo.ZipFile -DestinationPath $destDir -Force
             Write-Log "Extracted via PowerShell" "OK"
         }
@@ -411,7 +411,7 @@ function Expand-Sample {
     }
 }
 
-# ─── CONTROLLED EXECUTION ───────────────────────────────────────────────────
+# === CONTROLLED EXECUTION =====================================================
 function Invoke-SampleExecution {
     param(
         [int]$DelayBetweenSeconds = 15,
@@ -424,18 +424,18 @@ function Invoke-SampleExecution {
     }
 
     Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════════════════════╗" -ForegroundColor Red
-    Write-Host "  ║                    ⚠  WARNING  ⚠                       ║" -ForegroundColor Red
-    Write-Host "  ║   About to execute live malware samples.                ║" -ForegroundColor Red
-    Write-Host "  ║   Ensure this is an ISOLATED, VIRTUALIZED environment.  ║" -ForegroundColor Red
-    Write-Host "  ║   EDR/XDR must be ACTIVE and MONITORING.                ║" -ForegroundColor Red
-    Write-Host "  ╠══════════════════════════════════════════════════════════╣" -ForegroundColor Red
+    Write-Host "  +============================================================+" -ForegroundColor Red
+    Write-Host "  |                    !!  WARNING  !!                          |" -ForegroundColor Red
+    Write-Host "  |   About to execute live malware samples.                   |" -ForegroundColor Red
+    Write-Host "  |   Ensure this is an ISOLATED, VIRTUALIZED environment.     |" -ForegroundColor Red
+    Write-Host "  |   EDR/XDR must be ACTIVE and MONITORING.                   |" -ForegroundColor Red
+    Write-Host "  +------------------------------------------------------------+" -ForegroundColor Red
     if ($Method -eq "InMemory") {
-        Write-Host "  ║   Mode: IN-MEMORY (fileless) — no disk write            ║" -ForegroundColor Magenta
+        Write-Host "  |   Mode: IN-MEMORY (fileless) -- no disk write              |" -ForegroundColor Magenta
     } else {
-        Write-Host "  ║   Mode: DISK — standard filesystem execution            ║" -ForegroundColor Yellow
+        Write-Host "  |   Mode: DISK -- standard filesystem execution              |" -ForegroundColor Yellow
     }
-    Write-Host "  ╚══════════════════════════════════════════════════════════╝" -ForegroundColor Red
+    Write-Host "  +============================================================+" -ForegroundColor Red
     Write-Host ""
 
     $confirm = Read-Host "  Type 'CONFIRM' to proceed with $Method execution"
@@ -478,7 +478,7 @@ function Invoke-SampleExecution {
     Write-Log "Execution phase completed" "OK"
 }
 
-# ─── DISK EXECUTION (Standard) ──────────────────────────────────────────────
+# === DISK EXECUTION (Standard) ================================================
 function Invoke-DiskExecution {
     param([string]$SamplePath, [string]$SampleName)
 
@@ -489,11 +489,11 @@ function Invoke-DiskExecution {
         if ($SamplePath -match '\.dll$') {
             # DLLs: use rundll32
             $proc = Start-Process -FilePath "rundll32.exe" -ArgumentList "$SamplePath,DllMain" -PassThru -ErrorAction Stop
-            Write-Log "  PID: $($proc.Id) — Launched via rundll32" "OK"
+            Write-Log "  PID: $($proc.Id) -- Launched via rundll32" "OK"
         }
         else {
             $proc = Start-Process -FilePath $SamplePath -PassThru -ErrorAction Stop
-            Write-Log "  PID: $($proc.Id) — Process launched" "OK"
+            Write-Log "  PID: $($proc.Id) -- Process launched" "OK"
         }
 
         Start-Sleep -Seconds 3
@@ -509,7 +509,7 @@ function Invoke-DiskExecution {
     }
 }
 
-# ─── IN-MEMORY EXECUTION (Fileless) ─────────────────────────────────────────
+# === IN-MEMORY EXECUTION (Fileless) ===========================================
 function Invoke-InMemoryExecution {
     <#
     .SYNOPSIS
@@ -537,8 +537,8 @@ function Invoke-InMemoryExecution {
         catch { $isDotNet = $false }
 
         if ($isDotNet) {
-            # ── .NET Reflective Loading ──
-            Write-Log "  Detected .NET assembly — using Reflection.Assembly.Load()" "INFO"
+            # -- .NET Reflective Loading --
+            Write-Log "  Detected .NET assembly -- using Reflection.Assembly.Load()" "INFO"
 
             try {
                 $assembly = [System.Reflection.Assembly]::Load($bytes)
@@ -557,7 +557,7 @@ function Invoke-InMemoryExecution {
                     Write-Log "  .NET assembly invoked in-memory" "OK"
                 }
                 else {
-                    # No entry point — try to find and invoke Main from any type
+                    # No entry point -- try to find and invoke Main from any type
                     $types = $assembly.GetTypes()
                     $mainMethod = $null
                     foreach ($type in $types) {
@@ -580,8 +580,8 @@ function Invoke-InMemoryExecution {
             }
         }
         else {
-            # ── Native PE — Shellcode-style execution via P/Invoke ──
-            Write-Log "  Detected native PE — using VirtualAlloc + CreateThread" "INFO"
+            # -- Native PE -- Shellcode-style execution via P/Invoke --
+            Write-Log "  Detected native PE -- using VirtualAlloc + CreateThread" "INFO"
 
             # Add Win32 API types if not already loaded
             if (-not ([System.Management.Automation.PSTypeName]'Win32.Kernel32').Type) {
@@ -639,7 +639,7 @@ public class Win32 {
                     return
                 }
 
-                Write-Log "  Thread created — PE executing in memory" "OK"
+                Write-Log "  Thread created -- PE executing in memory" "OK"
 
                 # Wait briefly then check
                 [Win32.Kernel32]::WaitForSingleObject($thread, 5000) | Out-Null
@@ -656,13 +656,13 @@ public class Win32 {
     }
 }
 
-# ─── SUMMARY REPORT ─────────────────────────────────────────────────────────
+# === SUMMARY REPORT ===========================================================
 function Write-Summary {
     param([array]$Results)
 
-    Write-Host "`n  ═══════════════════════════════════════════════════════" -ForegroundColor DarkCyan
+    Write-Host "`n  ==========================================================" -ForegroundColor DarkCyan
     Write-Host "                     VALIDATION SUMMARY" -ForegroundColor Cyan
-    Write-Host "  ═══════════════════════════════════════════════════════" -ForegroundColor DarkCyan
+    Write-Host "  ==========================================================" -ForegroundColor DarkCyan
 
     $tableData = $Results | Where-Object { $_ } | Format-Table -Property @(
         @{Label="Family"; Expression={$_.Family}; Width=20}
@@ -683,7 +683,7 @@ function Write-Summary {
     if ($script:ExtractedSamples.Count -gt 0) {
         Write-Host "  Extracted Samples:" -ForegroundColor Cyan
         foreach ($s in $script:ExtractedSamples) {
-            Write-Host "    $($s.Family)/$($s.FileName) — $($s.SHA256.Substring(0,16))..." -ForegroundColor Gray
+            Write-Host "    $($s.Family)/$($s.FileName) -- $($s.SHA256.Substring(0,16))..." -ForegroundColor Gray
         }
     }
 
@@ -691,7 +691,7 @@ function Write-Summary {
     Write-Host ""
 }
 
-# ─── MAIN ────────────────────────────────────────────────────────────────────
+# === MAIN =====================================================================
 Write-Banner
 
 # Initialize log
@@ -730,7 +730,7 @@ Write-Summary -Results $results
 
 # Phase 2: Extract (if requested)
 if ($Mode -in @("Extract", "Full")) {
-    Write-Host "`n  ─── EXTRACTION PHASE ────────────────────────────────────" -ForegroundColor DarkCyan
+    Write-Host "`n  --- EXTRACTION PHASE ----------------------------------------" -ForegroundColor DarkCyan
 
     if (-not (Test-Path $ExtractPath)) {
         New-Item -ItemType Directory -Path $ExtractPath -Force | Out-Null
