@@ -801,9 +801,9 @@ Write-Log "Found $($families.Count) sample families" "INFO"
 
 # Phase 1: Validate
 $results = @()
-foreach ($family in $families) {
-    if ($family -and $family.FullName) {
-        $results += Test-SampleIntegrity -FamilyPath $family.FullName
+foreach ($familyDir in $families) {
+    if ($familyDir -and $familyDir.FullName) {
+        $results += Test-SampleIntegrity -FamilyPath $familyDir.FullName
     }
 }
 
