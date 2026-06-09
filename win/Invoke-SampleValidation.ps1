@@ -472,7 +472,7 @@ function Invoke-SampleExecution {
     }
 
     $exeSamples = @($script:ExtractedSamples | Where-Object {
-        $_.FileName -match '\.(exe|dll|scr|bat|cmd|ps1|vbs|js)$' -or
+        $_.FileName -match '\.(exe|dll|scr|bat|cmd|ps1|vbs|js|bin|dat)$' -or
         -not ($_.FileName -match '\.')
     })
 
@@ -537,6 +537,14 @@ function Invoke-DiskExecution {
         elseif ($SamplePath -match '\.ps1$') {
             $proc = Start-Process -FilePath "powershell.exe" -ArgumentList "-ExecutionPolicy Bypass -File `"$SamplePath`"" -PassThru -ErrorAction Stop
             Write-Log "  PID: $($proc.Id) -- Launched via powershell.exe" "OK"
+        }
+        elseif ($SamplePath -match '\.(bin|dat)$') {
+            # Binary samples: copy as .exe to temp path and execute
+            $tempExe = Join-Path $env:TEMP "$(Split-Path $SamplePath -LeafBase)_$(Get-Random).exe"
+            Copy-Item -Path $SamplePath -Destination $tempExe -Force
+            Write-Log "  Copied .bin/.dat to: $tempExe" "INFO"
+            $proc = Start-Process -FilePath $tempExe -PassThru -ErrorAction Stop
+            Write-Log "  PID: $($proc.Id) -- Launched via temp .exe copy" "OK"
         }
         else {
             $proc = Start-Process -FilePath $SamplePath -PassThru -ErrorAction Stop
